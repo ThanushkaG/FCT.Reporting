@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="FCT.Reporting.Api/FCT.Reporting.Api.csproj" />
+  <Project Path="FCT.Reporting.Application/FCT.Reporting.Application.csproj" />
+  <Project Path="FCT.Reporting.Contracts/FCT.Reporting.Contracts.csproj" />
+  <Project Path="FCT.Reporting.Domain/FCT.Reporting.Domain.csproj" />
+  <Project Path="FCT.Reporting.Infrastructure/FCT.Reporting.Infrastructure.csproj" />
+</Solution>

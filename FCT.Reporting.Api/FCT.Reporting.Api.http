@@ -1,0 +1,6 @@
+@FCT.Reporting.Api_HostAddress = http://localhost:5183
+
+GET {{FCT.Reporting.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
