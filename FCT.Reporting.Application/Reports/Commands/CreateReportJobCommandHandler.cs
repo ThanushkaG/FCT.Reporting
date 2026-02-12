@@ -28,7 +28,6 @@ namespace FCT.Reporting.Application.Reports.Commands
 
             await _repo.AddAsync(job, ct);
 
-            // write outbox message (publisher writes into Outbox table within same scope)
             await _publisher.PublishAsync(new GenerateReportRequested(jobId), ct);
 
             await _repo.SaveChangesAsync(ct);

@@ -15,7 +15,6 @@ using Azure.Extensions.AspNetCore.Configuration.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// If Key Vault name is provided, load secrets into configuration (single registration)
 var kvName = builder.Configuration["KeyVault:Name"]; 
 if (!string.IsNullOrEmpty(kvName))
 {
