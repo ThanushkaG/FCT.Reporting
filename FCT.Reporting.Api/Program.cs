@@ -1,22 +1,41 @@
+using Azure.Identity;
+using Azure.Storage.Blobs;
+using FCT.Reporting.Api;
+using FCT.Reporting.Api.Hubs;
 using FCT.Reporting.Application.Abstractions;
 using FCT.Reporting.Application.Reports.Commands;
 using FCT.Reporting.Infrastructure.Messaging;
 using FCT.Reporting.Infrastructure.Persistence;
 using FCT.Reporting.Infrastructure.Security;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Identity.Web;
 using RabbitMQ.Client;
+using Azure.Extensions.AspNetCore.Configuration.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// If Key Vault name is provided, load secrets into configuration (single registration)
+var kvName = builder.Configuration["KeyVault:Name"]; 
+if (!string.IsNullOrEmpty(kvName))
+{
+    var kvUri = new Uri($"https://{kvName}.vault.azure.net/");
+    builder.Configuration.AddAzureKeyVault(kvUri, new DefaultAzureCredential());
+}
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
 
 // Entra ID
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 
-// Scope policies (scp is space-separated)
+
+//Authorization
+
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Reports.Generate", policy =>
@@ -34,48 +53,80 @@ builder.Services.AddAuthorization(options =>
         }));
 });
 
-// CORS for Angular
+
+// CORS
+
 builder.Services.AddCors(o =>
 {
     o.AddPolicy("spa", p =>
         p.WithOrigins("http://localhost:4200")
          .AllowAnyHeader()
-         .AllowAnyMethod());
+         .AllowAnyMethod()
+         .AllowCredentials());
 });
 
-// EF Core 10
+
+//  Database (from Key Vault)
+
 builder.Services.AddDbContext<ReportingDbContext>(opt =>
-    opt.UseSqlServer(builder.Configuration.GetConnectionString("Sql")));
+{
+    var cs = builder.Configuration["Sql:ConnectionString"];
+    opt.UseSqlServer(cs);
+});
+
 
 // MediatR
-builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CreateReportJobCommand>());
+
+builder.Services.AddMediatR(cfg =>
+    cfg.RegisterServicesFromAssemblyContaining<CreateReportJobCommand>());
+
 
 // Current user
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
-// Repos + ports
+
+// Repositories
+
 builder.Services.AddScoped<IReportJobRepository, ReportJobRepository>();
 
-// Blob
-builder.Services.AddSingleton(_ => new BlobServiceClient(builder.Configuration.GetConnectionString("Blob")));
-builder.Services.AddSingleton<IFileStorage>(sp =>
-    new AzureBlobFileStorage(sp.GetRequiredService<BlobServiceClient>(), builder.Configuration["Blob:Container"]!));
 
-// RabbitMQ (dispatcher publish)
+// Blob Storage (from Key Vault)
+
+builder.Services.AddSingleton(_ =>
+{
+    var cs = builder.Configuration["Blob:ConnectionString"];
+    return new BlobServiceClient(cs);
+});
+
+builder.Services.AddSingleton<IFileStorage>(sp =>
+    new AzureBlobFileStorage(
+        sp.GetRequiredService<BlobServiceClient>(),
+        builder.Configuration["Blob:Container"]!
+    ));
+
+
+// RabbitMQ (from Key Vault)
+
 builder.Services.AddSingleton<IConnectionFactory>(_ =>
-    new ConnectionFactory
+{
+    var uri = builder.Configuration["Rabbit:Uri"];
+
+    return new ConnectionFactory
     {
-        HostName = builder.Configuration["Rabbit:Host"],
-        UserName = builder.Configuration["Rabbit:User"],
-        Password = builder.Configuration["Rabbit:Pass"]
-    });
+        Uri = new Uri(uri)
+    };
+});
 
 builder.Services.AddSingleton<IRabbitPublisher, RabbitMqClientPublisher>();
 
-// Outbox writer + dispatcher
-builder.Services.AddScoped<IMessagePublisher, OutboxMessagePublisher>();
-builder.Services.AddHostedService<OutboxDispatcherHostedService>();
+
+// Notification publisher
+
+builder.Services.AddSignalR();
+builder.Services.AddScoped<INotificationPublisher, SignalRNotificationPublisher>();
+
 
 var app = builder.Build();
 
@@ -88,4 +139,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<ReportsHub>("/hubs/reports");
+
 app.Run();

@@ -4,4 +4,5 @@
   <Project Path="FCT.Reporting.Contracts/FCT.Reporting.Contracts.csproj" />
   <Project Path="FCT.Reporting.Domain/FCT.Reporting.Domain.csproj" />
   <Project Path="FCT.Reporting.Infrastructure/FCT.Reporting.Infrastructure.csproj" />
+  <Project Path="FCT.Reporting.Worker/FCT.Reporting.Worker.csproj" />
 </Solution>

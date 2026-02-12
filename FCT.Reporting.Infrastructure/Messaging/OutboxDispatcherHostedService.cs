@@ -1,23 +1,32 @@
 ﻿using FCT.Reporting.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FCT.Reporting.Infrastructure.Messaging
 {
-    public sealed class OutboxDispatcherHostedService(
-     IServiceScopeFactory scopeFactory,
-     ILogger<OutboxDispatcherHostedService> logger) : BackgroundService
+    public sealed class OutboxDispatcherHostedService : BackgroundService
     {
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILogger<OutboxDispatcherHostedService> _logger;
+
+        public OutboxDispatcherHostedService(IServiceScopeFactory scopeFactory, ILogger<OutboxDispatcherHostedService> logger)
+        {
+            _scopeFactory = scopeFactory;
+            _logger = logger;
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    using var scope = scopeFactory.CreateScope();
+                    using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<ReportingDbContext>();
                     var publisher = scope.ServiceProvider.GetRequiredService<IRabbitPublisher>();
 
@@ -47,7 +56,7 @@ namespace FCT.Reporting.Infrastructure.Messaging
                         {
                             msg.AttemptCount++;
                             msg.LastError = ex.Message.Length > 1900 ? ex.Message[..1900] : ex.Message;
-                            logger.LogError(ex, "Outbox publish failed for {Id} type {Type}", msg.Id, msg.Type);
+                            _logger.LogError(ex, "Outbox publish failed for {Id} type {Type}", msg.Id, msg.Type);
                         }
                     }
 
@@ -56,7 +65,7 @@ namespace FCT.Reporting.Infrastructure.Messaging
                 catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Outbox dispatcher loop error");
+                    _logger.LogError(ex, "Outbox dispatcher loop error");
                     await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 }
             }

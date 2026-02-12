@@ -1,45 +1,76 @@
 ﻿using RabbitMQ.Client;
 using System.Text;
 
-namespace FCT.Reporting.Infrastructure.Messaging
+namespace FCT.Reporting.Infrastructure.Messaging;
+
+public interface IRabbitPublisher
 {
-    public interface IRabbitPublisher
+    Task PublishAsync(string messageType, string payloadJson, CancellationToken ct);
+}
+
+public sealed class RabbitMqClientPublisher : IRabbitPublisher, IAsyncDisposable
+{
+    private readonly IConnectionFactory _factory;
+    private IConnection? _connection;
+
+    private const string ExchangeName = "fct.reporting.exchange";
+
+    public RabbitMqClientPublisher(IConnectionFactory factory)
     {
-        Task PublishAsync(string messageType, string payloadJson, CancellationToken ct);
+        _factory = factory;
     }
 
-    public sealed class RabbitMqClientPublisher(IConnectionFactory factory) : IRabbitPublisher, IDisposable
+    private async Task<IConnection> GetConnectionAsync(CancellationToken ct)
     {
-        private readonly IConnection _connection = factory.CreateConnection();
-        private const string ExchangeName = "fct.reporting.exchange";
+        if (_connection is { IsOpen: true })
+            return _connection;
 
-        public Task PublishAsync(string messageType, string payloadJson, CancellationToken ct)
+        _connection = await _factory.CreateConnectionAsync(ct);
+        return _connection;
+    }
+
+    public async Task PublishAsync(string messageType, string payloadJson, CancellationToken ct)
+    {
+        var connection = await GetConnectionAsync(ct);
+
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: ct);
+
+        await channel.ExchangeDeclareAsync(
+            exchange: ExchangeName,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false,
+            cancellationToken: ct);
+
+        var props = new BasicProperties
         {
-            // IModel is not thread-safe → create per publish (safe)
-            using var channel = _connection.CreateModel();
+            Persistent = true,
+            ContentType = "application/json",
+            Type = messageType
+        };
 
-            channel.ExchangeDeclare(ExchangeName, ExchangeType.Direct, durable: true, autoDelete: false);
-            channel.ConfirmSelect();
+        var body = Encoding.UTF8.GetBytes(payloadJson);
 
-            var props = channel.CreateBasicProperties();
-            props.Persistent = true;
-            props.ContentType = "application/json";
-            props.Type = messageType;
-
-            var body = System.Text.Encoding.UTF8.GetBytes(payloadJson);
-
-            channel.BasicPublish(
+        try
+        {
+            await channel.BasicPublishAsync(
                 exchange: ExchangeName,
                 routingKey: messageType,
+                mandatory: true,
                 basicProperties: props,
-                body: body);
-
-            if (!channel.WaitForConfirms(TimeSpan.FromSeconds(5)))
-                throw new Exception("RabbitMQ publish confirm failed.");
-
-            return Task.CompletedTask;
+                body: body,
+                cancellationToken: ct);
         }
+        catch (Exception)
+        {
+            // retry strategy can be added here
+            throw;
+        }
+    }
 
-        public void Dispose() => _connection.Dispose();
+    public async ValueTask DisposeAsync()
+    {
+        if (_connection != null)
+            await _connection.DisposeAsync();
     }
 }
