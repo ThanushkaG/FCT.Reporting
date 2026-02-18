@@ -109,8 +109,11 @@ namespace FCT.Reporting.Worker
 
                 var container = _blobServiceClient.GetBlobContainerClient("reports");
                 await container.CreateIfNotExistsAsync(cancellationToken: ct);
-                var blobName = $"reports/{job.Id}.xlsx";
+
+                // Blob name = GUID only
+                var blobName = $"{job.Id}.xlsx";
                 var blobClient = container.GetBlobClient(blobName);
+
                 await blobClient.UploadAsync(ms, overwrite: true, cancellationToken: ct);
 
                 job.MarkCompleted(blobName);
