@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using RabbitMQ.Client;
 using Azure.Extensions.AspNetCore.Configuration.Secrets;
+using FCT.Reporting.Infrastructure.Repository;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,19 +38,11 @@ builder.Services
 
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("Reports.Generate", policy =>
-        policy.RequireAssertion(ctx =>
-        {
-            var scp = ctx.User.FindFirst("scp")?.Value ?? "";
-            return scp.Split(' ').Contains("Reports.Generate");
-        }));
+    options.AddPolicy("Reports.Generate",
+        policy => policy.RequireScope("Reports.Generate"));
 
-    options.AddPolicy("Reports.Read", policy =>
-        policy.RequireAssertion(ctx =>
-        {
-            var scp = ctx.User.FindFirst("scp")?.Value ?? "";
-            return scp.Split(' ').Contains("Reports.Read");
-        }));
+    options.AddPolicy("Reports.Read",
+        policy => policy.RequireScope("Reports.Read"));
 });
 
 
@@ -80,11 +73,11 @@ builder.Services.AddMediatR(cfg =>
     cfg.RegisterServicesFromAssemblyContaining<CreateReportJobCommand>());
 
 
-// Current user
+// DI
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
-
+builder.Services.AddTransient<IMessagePublisher, OutboxMessagePublisher>();
 
 // Repositories
 
@@ -130,7 +123,11 @@ builder.Services.AddScoped<INotificationPublisher, SignalRNotificationPublisher>
 var app = builder.Build();
 
 app.UseSwagger();
-app.UseSwaggerUI();
+app.UseSwaggerUI(options =>
+{
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "v1");
+    options.RoutePrefix = string.Empty; 
+});
 
 app.UseCors("spa");
 
@@ -139,5 +136,12 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<ReportsHub>("/hubs/reports");
+
+// Apply migrations automatically
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ReportingDbContext>();
+    db.Database.Migrate();
+}
 
 app.Run();

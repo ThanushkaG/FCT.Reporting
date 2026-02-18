@@ -2,5 +2,5 @@
 
 namespace FCT.Reporting.Application.Reports.Commands
 {
-    public record CreateReportJobCommand() : IRequest<Guid>;
+    public record CreateReportJobCommand(string RequestedBy) : IRequest<Guid>;
 }

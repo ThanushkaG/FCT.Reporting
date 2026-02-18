@@ -4,6 +4,10 @@ using FCT.Reporting.Application.Abstractions;
 using FCT.Reporting.Domain.Entities;
 using FCT.Reporting.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using System.Text;
+using System.Text.Json;
 
 namespace FCT.Reporting.Worker
 {
@@ -13,13 +17,16 @@ namespace FCT.Reporting.Worker
         private readonly ReportingDbContext _db;
         private readonly INotificationPublisher _notifier;
         private readonly ILogger<ReportWorker> _logger;
+        private readonly IConnectionFactory _factory;
 
         public ReportWorker(
-            BlobServiceClient blobServiceClient,
-            ReportingDbContext db,
-            INotificationPublisher notifier,
-            ILogger<ReportWorker> logger)
+    IConnectionFactory factory,
+    BlobServiceClient blobServiceClient,
+    ReportingDbContext db,
+    INotificationPublisher notifier,
+    ILogger<ReportWorker> logger)
         {
+            _factory = factory;
             _blobServiceClient = blobServiceClient;
             _db = db;
             _notifier = notifier;
@@ -28,33 +35,57 @@ namespace FCT.Reporting.Worker
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            _logger.LogInformation("ReportWorker started (RabbitMQ consumer)");
+
+            var connection = await _factory.CreateConnectionAsync();
+            var channel = await connection.CreateChannelAsync();
+
+            await channel.ExchangeDeclareAsync("report.exchange", ExchangeType.Topic, durable: true);
+            await channel.QueueDeclareAsync("report.queue", durable: true, exclusive: false);
+            await channel.QueueBindAsync("report.queue", "report.exchange", "report.requested");
+
+            var consumer = new AsyncEventingBasicConsumer(channel);
+
+            consumer.ReceivedAsync += async (_, ea) =>
             {
                 try
                 {
+                    var body = Encoding.UTF8.GetString(ea.Body.ToArray());
+
+                    var payload = JsonSerializer.Deserialize<Dictionary<string, Guid>>(body);
+
+                    if (payload == null || !payload.TryGetValue("JobId", out var jobId))
+                    {
+                        await channel.BasicNackAsync(ea.DeliveryTag, false, false);
+                        return;
+                    }
+
                     var job = await _db.ReportJobs
-                        .Where(j => j.Status == Domain.Enums.ReportJobStatus.Pending)
-                        .OrderBy(j => j.CreatedUtc)
-                        .FirstOrDefaultAsync(stoppingToken);
+                        .FirstOrDefaultAsync(j => j.Id == jobId, stoppingToken);
 
                     if (job == null)
                     {
-                        await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
-                        continue;
+                        await channel.BasicAckAsync(ea.DeliveryTag, false);
+                        return;
                     }
 
                     job.MarkProcessing();
                     await _db.SaveChangesAsync(stoppingToken);
 
                     await ProcessJobAsync(job, stoppingToken);
+
+                    await channel.BasicAckAsync(ea.DeliveryTag, false);
                 }
-                catch (OperationCanceledException) { }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Worker loop error");
-                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                    _logger.LogError(ex, "Error processing RabbitMQ message");
+                    await channel.BasicNackAsync(ea.DeliveryTag, false, true);
                 }
-            }
+            };
+
+            await channel.BasicConsumeAsync("report.queue", autoAck: false, consumer);
+
+            await Task.Delay(Timeout.Infinite, stoppingToken);
         }
 
         private async Task ProcessJobAsync(ReportJob job, CancellationToken ct)

@@ -14,7 +14,8 @@ namespace FCT.Reporting.Api.Controllers
         [Authorize(Policy = "Reports.Generate")]
         public async Task<IActionResult> Create(CancellationToken ct)
         {
-            var jobId = await mediator.Send(new CreateReportJobCommand(), ct);
+            var requestedBy = User.Identity?.Name ?? "system";
+            var jobId = await mediator.Send(new CreateReportJobCommand(requestedBy), ct);
             return AcceptedAtAction(nameof(GetStatus), new { jobId }, new { jobId });
         }
 

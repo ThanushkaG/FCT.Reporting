@@ -2,6 +2,6 @@
 {
     public interface IMessagePublisher
     {
-        Task PublishAsync<T>(T message, CancellationToken ct) where T : class;
+        Task PublishAsync(string exchange, string routingKey, object message);
     }
 }

@@ -1,28 +1,44 @@
 ﻿using FCT.Reporting.Application.Abstractions;
 using FCT.Reporting.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore.Metadata;
+using RabbitMQ.Client;
+using System.Text;
 using System.Text.Json;
 
 namespace FCT.Reporting.Infrastructure.Messaging
 {
     public sealed class OutboxMessagePublisher : IMessagePublisher
     {
-        private readonly ReportingDbContext _db;
-        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+        private readonly IConnectionFactory _factory;
+        private IConnection? _connection;
+        private IChannel? _channel;
 
-        public OutboxMessagePublisher(ReportingDbContext db) => _db = db;
-
-        public Task PublishAsync<T>(T message, CancellationToken ct) where T : class
+        public OutboxMessagePublisher(IConnectionFactory factory)
         {
-            _db.OutboxMessages.Add(new OutboxMessage
-            {
-                Id = Guid.NewGuid(),
-                CreatedUtc = DateTime.UtcNow,
-                Type = typeof(T).Name,
-                Payload = JsonSerializer.Serialize(message, JsonOptions),
-                AttemptCount = 0
-            });
+            _factory = factory;
+        }
 
-            return Task.CompletedTask;
+        public async Task PublishAsync(string exchange, string routingKey, object message)
+        {
+            _connection ??= await _factory.CreateConnectionAsync();
+            _channel ??= await _connection.CreateChannelAsync();
+
+            await _channel.ExchangeDeclareAsync(exchange, ExchangeType.Topic, durable: true);
+
+            var json = JsonSerializer.Serialize(message);
+            var body = Encoding.UTF8.GetBytes(json);
+
+            var props = new BasicProperties
+            {
+                Persistent = true
+            };
+
+            await _channel.BasicPublishAsync(
+                exchange,
+                routingKey,
+                mandatory: false,
+                basicProperties: props,
+                body: body);
         }
     }
 }

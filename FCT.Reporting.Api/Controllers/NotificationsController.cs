@@ -15,9 +15,8 @@ namespace FCT.Reporting.Api.Controllers
         [HttpPost("job-updated")]
         public async Task<IActionResult> JobUpdated([FromBody] ReportJobDto dto, CancellationToken ct)
         {
-            // lightweight mapping - only fields used by notification
             var job = new ReportJob(dto.Id, dto.RequestedBy);
-            // set status/optional blob/error
+
             if (!string.IsNullOrEmpty(dto.BlobName)) job.MarkCompleted(dto.BlobName);
             if (!string.IsNullOrEmpty(dto.Error)) job.MarkFailed(dto.Error);
 

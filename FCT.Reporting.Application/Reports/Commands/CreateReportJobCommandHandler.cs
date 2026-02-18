@@ -5,34 +5,35 @@ using MediatR;
 
 namespace FCT.Reporting.Application.Reports.Commands
 {
-    public sealed class CreateReportJobCommandHandler : IRequestHandler<CreateReportJobCommand, Guid>
+    public sealed class CreateReportJobCommandHandler
+    : IRequestHandler<CreateReportJobCommand, Guid>
     {
-        private readonly IReportJobRepository _repo;
-        private readonly ICurrentUser _currentUser;
-        private readonly IMessagePublisher _publisher;
+        private readonly IReportJobRepository _repository;
+        private readonly IMessagePublisher _rabbitPublisher;
 
         public CreateReportJobCommandHandler(
-            IReportJobRepository repo,
-            ICurrentUser currentUser,
-            IMessagePublisher publisher)
+            IReportJobRepository repository,
+            IMessagePublisher rabbitPublisher)
         {
-            _repo = repo;
-            _currentUser = currentUser;
-            _publisher = publisher;
+            _repository = repository;
+            _rabbitPublisher = rabbitPublisher;
         }
 
-        public async Task<Guid> Handle(CreateReportJobCommand request, CancellationToken ct)
+        public async Task<Guid> Handle(
+            CreateReportJobCommand request,
+            CancellationToken ct)
         {
-            var jobId = Guid.NewGuid();
-            var job = new ReportJob(jobId, _currentUser.UserId);
+            var job = new ReportJob(Guid.NewGuid(), request.RequestedBy);
 
-            await _repo.AddAsync(job, ct);
+            await _repository.AddAsync(job, ct);
+            await _repository.SaveChangesAsync(ct);
 
-            await _publisher.PublishAsync(new GenerateReportRequested(jobId), ct);
+            await _rabbitPublisher.PublishAsync(
+                "report.exchange",
+                "report.requested",
+                new { JobId = job.Id });
 
-            await _repo.SaveChangesAsync(ct);
-
-            return jobId;
+            return job.Id;
         }
     }
 }

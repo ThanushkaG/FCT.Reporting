@@ -7,5 +7,6 @@ namespace FCT.Reporting.Application.Abstractions
         Task AddAsync(ReportJob job, CancellationToken ct);
         Task<ReportJob?> GetAsync(Guid id, CancellationToken ct);
         Task SaveChangesAsync(CancellationToken ct);
+        Task<ReportJob?> GetByIdAsync(Guid id, CancellationToken ct);
     }
 }
