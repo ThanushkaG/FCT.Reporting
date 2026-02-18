@@ -14,7 +14,7 @@ namespace FCT.Reporting.Domain.Entities
         public string? BlobName { get; private set; }
         public string? Error { get; private set; }
 
-        private ReportJob() { } // EF
+        private ReportJob() { } 
 
         public ReportJob(Guid id, string requestedBy)
         {
